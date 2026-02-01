@@ -24,4 +24,4 @@ class Service(Base):
     description = Column(Text, nullable=True)
     endpoint = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    last_accessed = Column(DateTime(timezone=True), onupdate=func.now())
+    last_updated = Column(DateTime(timezone=True), onupdate=func.now())

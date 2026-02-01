@@ -2,23 +2,27 @@
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
+from contextlib import asynccontextmanager
 
 from app import crud, schemas
 from app.database import get_db, init_db
+
+
+# Lifespan context manager for startup/shutdown
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize database tables on startup."""
+    init_db()
+    yield
+
 
 # Create FastAPI application
 app = FastAPI(
     title="LUCICORE API",
     description="Database API for multiple services to connect",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
-
-
-# Initialize database on startup
-@app.on_event("startup")
-def startup_event():
-    """Initialize database tables on startup."""
-    init_db()
 
 
 # Root endpoint

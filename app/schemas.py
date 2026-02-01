@@ -53,6 +53,6 @@ class Service(ServiceBase):
     """Schema for Service response."""
     id: int
     created_at: datetime
-    last_accessed: Optional[datetime] = None
+    last_updated: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
