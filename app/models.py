@@ -1,59 +1,80 @@
-"""Database models."""
-from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, Float
+"""
+Модели базы данных LUCICORE.
+
+Определяет SQLAlchemy-модели для всех таблиц.
+Каждая сущность получает уникальный ``hash_id`` — публичный
+идентификатор, используемый вместо числового ``id`` в API.
+"""
+from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, Float, event
 from sqlalchemy.sql import func
 from app.database import Base
 
 
-class Item(Base):
-    """Item model for storing generic items."""
-    __tablename__ = "items"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(255), nullable=False, index=True)
-    description = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
-
-class Service(Base):
-    """Service model for tracking connected services."""
-    __tablename__ = "services"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(255), nullable=False, unique=True, index=True)
-    description = Column(Text, nullable=True)
-    endpoint = Column(String(500), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    last_updated = Column(DateTime(timezone=True), onupdate=func.now())
-
-
 class User(Base):
-    """User model based on Merchant API structure."""
+    """Модель пользователя.
+
+    Содержит профильные данные, статус, баланс,
+    интеграцию с Merchant API и привязку к Telegram.
+
+    Атрибуты:
+        id:                  Внутренний числовой PK (не отдаётся наружу).
+        hash_id:             Уникальный публичный HASH-идентификатор (22 символа).
+        username:            Уникальное имя пользователя.
+        email:               E-mail (уникальный, опционально).
+        password_hash:       Хеш пароля (PBKDF2-SHA256).
+        first_name:          Имя.
+        last_name:           Фамилия.
+        avatar:              URL аватара.
+        is_active:           Активен ли аккаунт.
+        is_verified:         Подтверждён ли аккаунт.
+        balance:             Баланс пользователя.
+        merchant_client_id:  ID клиента в Merchant API.
+        telegram_uid:        UID в Telegram.
+        session_token:       Сессионный токен Merchant API.
+        created_at:          Дата создания.
+        updated_at:          Дата последнего обновления.
+        last_login:          Дата последнего входа.
+    """
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
+    hash_id = Column(String(32), unique=True, nullable=False, index=True)
     username = Column(String(255), nullable=False, unique=True, index=True)
     email = Column(String(255), nullable=True, unique=True, index=True)
     password_hash = Column(String(255), nullable=False)
 
-    # Profile fields
+    # Поля профиля
     first_name = Column(String(255), nullable=True)
     last_name = Column(String(255), nullable=True)
     avatar = Column(String(500), nullable=True)
 
-    # Status flags
+    # Флаги статуса
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
 
-    # Balance (from merchant_api client balance feature)
+    # Баланс (из функции баланса клиента Merchant API)
     balance = Column(Float, default=0.0)
 
-    # Merchant API integration fields
+    # Поля интеграции с Merchant API
     merchant_client_id = Column(Integer, nullable=True, index=True)
     telegram_uid = Column(String(255), nullable=True, unique=True)
     session_token = Column(String(500), nullable=True)
 
-    # Timestamps
+    # Временные метки
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     last_login = Column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<User(hash_id={self.hash_id!r}, username={self.username!r})>"
+
+
+def _set_hash_id_before_insert(mapper, connection, target):
+    """Автоматически генерирует ``hash_id`` перед INSERT, если не задан."""
+    if not target.hash_id:
+        from app.security import generate_hash_id
+        target.hash_id = generate_hash_id()
+
+
+# Подписка на событие — hash_id генерируется автоматически при создании
+event.listen(User, "before_insert", _set_hash_id_before_insert)

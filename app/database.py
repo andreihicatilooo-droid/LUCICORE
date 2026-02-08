@@ -1,27 +1,35 @@
-"""Database configuration and session management."""
+"""
+Конфигурация базы данных и управление сессиями.
+
+По умолчанию используется SQLite (``sqlite:///./lucicore.db``).
+Для смены СУБД достаточно установить переменную окружения ``DATABASE_URL``.
+"""
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
 
-# Database URL - defaults to SQLite, but can be configured via environment variable
+# URL подключения к БД — по умолчанию SQLite
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./lucicore.db")
 
-# Create database engine
+# Движок SQLAlchemy
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
+    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
 )
 
-# Create SessionLocal class
+# Фабрика локальных сессий
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Create Base class for models
+# Базовый класс для всех моделей
 Base = declarative_base()
 
 
 def get_db():
-    """Dependency to get database session."""
+    """FastAPI-зависимость: предоставляет сессию БД.
+
+    Сессия автоматически закрывается после завершения запроса.
+    """
     db = SessionLocal()
     try:
         yield db
@@ -30,5 +38,8 @@ def get_db():
 
 
 def init_db():
-    """Initialize database tables."""
+    """Создать все таблицы в БД (если не существуют).
+
+    Вызывается при старте сервера в ``lifespan`` (см. ``main.py``).
+    """
     Base.metadata.create_all(bind=engine)

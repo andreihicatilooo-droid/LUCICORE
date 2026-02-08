@@ -1,139 +1,131 @@
-"""CRUD operations for database."""
+"""
+CRUD-операции для базы данных LUCICORE.
+
+Содержит функции создания, чтения, обновления и удаления
+пользователей.  Поиск возможен по числовому ``id``, ``hash_id``,
+``username``, ``email``, ``merchant_client_id`` и ``telegram_uid``.
+"""
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from app import models, schemas
 
 
-# Item CRUD operations
-def get_item(db: Session, item_id: int) -> Optional[models.Item]:
-    """Get a single item by ID."""
-    return db.query(models.Item).filter(models.Item.id == item_id).first()
+# =========================================================================
+# Пользователи — чтение
+# =========================================================================
 
-
-def get_items(db: Session, skip: int = 0, limit: int = 100) -> List[models.Item]:
-    """Get a list of items."""
-    return db.query(models.Item).offset(skip).limit(limit).all()
-
-
-def create_item(db: Session, item: schemas.ItemCreate) -> models.Item:
-    """Create a new item."""
-    db_item = models.Item(**item.model_dump())
-    db.add(db_item)
-    db.commit()
-    db.refresh(db_item)
-    return db_item
-
-
-def update_item(db: Session, item_id: int, item: schemas.ItemUpdate) -> Optional[models.Item]:
-    """Update an existing item."""
-    db_item = get_item(db, item_id)
-    if db_item is None:
-        return None
-    
-    update_data = item.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(db_item, key, value)
-    
-    db.commit()
-    db.refresh(db_item)
-    return db_item
-
-
-def delete_item(db: Session, item_id: int) -> bool:
-    """Delete an item."""
-    db_item = get_item(db, item_id)
-    if db_item is None:
-        return False
-    
-    db.delete(db_item)
-    db.commit()
-    return True
-
-
-# Service CRUD operations
-def get_service(db: Session, service_id: int) -> Optional[models.Service]:
-    """Get a single service by ID."""
-    return db.query(models.Service).filter(models.Service.id == service_id).first()
-
-
-def get_service_by_name(db: Session, name: str) -> Optional[models.Service]:
-    """Get a service by name."""
-    return db.query(models.Service).filter(models.Service.name == name).first()
-
-
-def get_services(db: Session, skip: int = 0, limit: int = 100) -> List[models.Service]:
-    """Get a list of services."""
-    return db.query(models.Service).offset(skip).limit(limit).all()
-
-
-def create_service(db: Session, service: schemas.ServiceCreate) -> models.Service:
-    """Create a new service."""
-    db_service = models.Service(**service.model_dump())
-    db.add(db_service)
-    db.commit()
-    db.refresh(db_service)
-    return db_service
-
-
-def update_service(db: Session, service_id: int, service: schemas.ServiceUpdate) -> Optional[models.Service]:
-    """Update an existing service."""
-    db_service = get_service(db, service_id)
-    if db_service is None:
-        return None
-    
-    update_data = service.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(db_service, key, value)
-    
-    db.commit()
-    db.refresh(db_service)
-    return db_service
-
-
-def delete_service(db: Session, service_id: int) -> bool:
-    """Delete a service."""
-    db_service = get_service(db, service_id)
-    if db_service is None:
-        return False
-
-    db.delete(db_service)
-    db.commit()
-    return True
-
-
-# User CRUD operations
 def get_user(db: Session, user_id: int) -> Optional[models.User]:
-    """Get a single user by ID."""
+    """Получить пользователя по числовому ID (внутренний).
+
+    Аргументы:
+        db:      Сессия базы данных.
+        user_id: Числовой первичный ключ.
+
+    Возвращает:
+        Объект ``User`` или ``None``.
+    """
     return db.query(models.User).filter(models.User.id == user_id).first()
 
 
+def get_user_by_hash_id(db: Session, hash_id: str) -> Optional[models.User]:
+    """Получить пользователя по публичному HASH-идентификатору.
+
+    Это основной способ поиска пользователя в публичных API-запросах.
+
+    Аргументы:
+        db:      Сессия базы данных.
+        hash_id: Уникальный HASH-идентификатор (22 символа).
+
+    Возвращает:
+        Объект ``User`` или ``None``.
+    """
+    return db.query(models.User).filter(models.User.hash_id == hash_id).first()
+
+
 def get_user_by_username(db: Session, username: str) -> Optional[models.User]:
-    """Get a user by username."""
+    """Получить пользователя по имени пользователя.
+
+    Аргументы:
+        db:       Сессия базы данных.
+        username: Уникальное имя пользователя.
+
+    Возвращает:
+        Объект ``User`` или ``None``.
+    """
     return db.query(models.User).filter(models.User.username == username).first()
 
 
 def get_user_by_email(db: Session, email: str) -> Optional[models.User]:
-    """Get a user by email."""
+    """Получить пользователя по e-mail.
+
+    Аргументы:
+        db:    Сессия базы данных.
+        email: E-mail адрес.
+
+    Возвращает:
+        Объект ``User`` или ``None``.
+    """
     return db.query(models.User).filter(models.User.email == email).first()
 
 
 def get_user_by_merchant_client_id(db: Session, merchant_client_id: int) -> Optional[models.User]:
-    """Get a user by merchant API client ID."""
+    """Получить пользователя по ID клиента Merchant API.
+
+    Аргументы:
+        db:                 Сессия базы данных.
+        merchant_client_id: ID клиента в Merchant API.
+
+    Возвращает:
+        Объект ``User`` или ``None``.
+    """
     return db.query(models.User).filter(models.User.merchant_client_id == merchant_client_id).first()
 
 
 def get_user_by_telegram_uid(db: Session, telegram_uid: str) -> Optional[models.User]:
-    """Get a user by Telegram UID."""
+    """Получить пользователя по Telegram UID.
+
+    Аргументы:
+        db:           Сессия базы данных.
+        telegram_uid: Уникальный идентификатор Telegram.
+
+    Возвращает:
+        Объект ``User`` или ``None``.
+    """
     return db.query(models.User).filter(models.User.telegram_uid == telegram_uid).first()
 
 
 def get_users(db: Session, skip: int = 0, limit: int = 100) -> List[models.User]:
-    """Get a list of users."""
+    """Получить список пользователей с пагинацией.
+
+    Аргументы:
+        db:    Сессия базы данных.
+        skip:  Количество пропускаемых записей (по умолчанию 0).
+        limit: Максимальное количество записей (по умолчанию 100).
+
+    Возвращает:
+        Список объектов ``User``.
+    """
     return db.query(models.User).offset(skip).limit(limit).all()
 
 
+# =========================================================================
+# Пользователи — создание
+# =========================================================================
+
 def create_user(db: Session, user: schemas.UserCreate, password_hash: str) -> models.User:
-    """Create a new user."""
+    """Создать нового пользователя.
+
+    ``hash_id`` генерируется автоматически через SQLAlchemy-событие
+    ``before_insert`` (см. ``models.py``).
+
+    Аргументы:
+        db:            Сессия базы данных.
+        user:          Данные для создания (схема ``UserCreate``).
+        password_hash: Хеш пароля (результат ``security.hash_password``).
+
+    Возвращает:
+        Созданный объект ``User`` с заполненным ``hash_id``.
+    """
     user_data = user.model_dump(exclude={"password"})
     db_user = models.User(**user_data, password_hash=password_hash)
     db.add(db_user)
@@ -142,8 +134,21 @@ def create_user(db: Session, user: schemas.UserCreate, password_hash: str) -> mo
     return db_user
 
 
+# =========================================================================
+# Пользователи — обновление
+# =========================================================================
+
 def update_user(db: Session, user_id: int, user: schemas.UserUpdate) -> Optional[models.User]:
-    """Update an existing user."""
+    """Обновить данные пользователя.
+
+    Аргументы:
+        db:      Сессия базы данных.
+        user_id: Числовой ID пользователя.
+        user:    Данные для обновления (схема ``UserUpdate``).
+
+    Возвращает:
+        Обновлённый объект ``User`` или ``None`` если не найден.
+    """
     db_user = get_user(db, user_id)
     if db_user is None:
         return None
@@ -157,8 +162,42 @@ def update_user(db: Session, user_id: int, user: schemas.UserUpdate) -> Optional
     return db_user
 
 
+def update_user_by_hash(db: Session, hash_id: str, user: schemas.UserUpdate) -> Optional[models.User]:
+    """Обновить данные пользователя по HASH-идентификатору.
+
+    Аргументы:
+        db:      Сессия базы данных.
+        hash_id: Публичный HASH-идентификатор.
+        user:    Данные для обновления (схема ``UserUpdate``).
+
+    Возвращает:
+        Обновлённый объект ``User`` или ``None`` если не найден.
+    """
+    db_user = get_user_by_hash_id(db, hash_id)
+    if db_user is None:
+        return None
+
+    update_data = user.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_user, key, value)
+
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+
 def update_user_balance(db: Session, user_id: int, amount: float, operation: str = "add") -> Optional[models.User]:
-    """Update user balance (add or subtract)."""
+    """Обновить баланс пользователя (пополнение или списание).
+
+    Аргументы:
+        db:        Сессия базы данных.
+        user_id:   Числовой ID пользователя.
+        amount:    Сумма операции.
+        operation: ``"add"`` — пополнение, ``"subtract"`` — списание.
+
+    Возвращает:
+        Обновлённый объект ``User`` или ``None`` если не найден.
+    """
     db_user = get_user(db, user_id)
     if db_user is None:
         return None
@@ -174,7 +213,15 @@ def update_user_balance(db: Session, user_id: int, amount: float, operation: str
 
 
 def update_user_last_login(db: Session, user_id: int) -> Optional[models.User]:
-    """Update user's last login timestamp."""
+    """Обновить дату последнего входа пользователя.
+
+    Аргументы:
+        db:      Сессия базы данных.
+        user_id: Числовой ID пользователя.
+
+    Возвращает:
+        Обновлённый объект ``User`` или ``None`` если не найден.
+    """
     from datetime import datetime
     db_user = get_user(db, user_id)
     if db_user is None:
@@ -187,7 +234,16 @@ def update_user_last_login(db: Session, user_id: int) -> Optional[models.User]:
 
 
 def link_merchant_client(db: Session, user_id: int, merchant_client_id: int) -> Optional[models.User]:
-    """Link a merchant API client ID to user."""
+    """Привязать ID клиента Merchant API к пользователю.
+
+    Аргументы:
+        db:                 Сессия базы данных.
+        user_id:            Числовой ID пользователя.
+        merchant_client_id: ID клиента в Merchant API.
+
+    Возвращает:
+        Обновлённый объект ``User`` или ``None`` если не найден.
+    """
     db_user = get_user(db, user_id)
     if db_user is None:
         return None
@@ -199,7 +255,16 @@ def link_merchant_client(db: Session, user_id: int, merchant_client_id: int) -> 
 
 
 def link_telegram(db: Session, user_id: int, telegram_uid: str) -> Optional[models.User]:
-    """Link a Telegram UID to user."""
+    """Привязать Telegram UID к пользователю.
+
+    Аргументы:
+        db:           Сессия базы данных.
+        user_id:      Числовой ID пользователя.
+        telegram_uid: UID пользователя в Telegram.
+
+    Возвращает:
+        Обновлённый объект ``User`` или ``None`` если не найден.
+    """
     db_user = get_user(db, user_id)
     if db_user is None:
         return None
@@ -210,9 +275,91 @@ def link_telegram(db: Session, user_id: int, telegram_uid: str) -> Optional[mode
     return db_user
 
 
-def delete_user(db: Session, user_id: int) -> bool:
-    """Delete a user."""
+def update_user_merchant_profile(
+    db: Session,
+    user_id: int,
+    merchant_client_id: Optional[int] = None,
+    telegram_uid: Optional[str] = None,
+    balance: Optional[float] = None,
+    first_name: Optional[str] = None,
+    last_name: Optional[str] = None,
+    avatar: Optional[str] = None,
+    session_token: Optional[str] = None,
+) -> Optional[models.User]:
+    """Обновить профиль пользователя из данных Merchant API.
+
+    Аргументы:
+        db:                 Сессия базы данных.
+        user_id:            Числовой ID пользователя.
+        merchant_client_id: ID клиента в Merchant API.
+        telegram_uid:       UID пользователя в Telegram.
+        balance:            Баланс.
+        first_name:         Имя.
+        last_name:          Фамилия.
+        avatar:             URL аватара.
+        session_token:      Сессионный токен Merchant API.
+
+    Возвращает:
+        Обновлённый объект ``User`` или ``None`` если не найден.
+    """
     db_user = get_user(db, user_id)
+    if db_user is None:
+        return None
+
+    if merchant_client_id is not None:
+        db_user.merchant_client_id = merchant_client_id
+    if telegram_uid is not None:
+        db_user.telegram_uid = telegram_uid
+    if balance is not None:
+        db_user.balance = balance
+    if first_name is not None:
+        db_user.first_name = first_name
+    if last_name is not None:
+        db_user.last_name = last_name
+    if avatar is not None:
+        db_user.avatar = avatar
+    if session_token is not None:
+        db_user.session_token = session_token
+
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+
+# =========================================================================
+# Пользователи — удаление
+# =========================================================================
+
+def delete_user(db: Session, user_id: int) -> bool:
+    """Удалить пользователя по числовому ID.
+
+    Аргументы:
+        db:      Сессия базы данных.
+        user_id: Числовой ID пользователя.
+
+    Возвращает:
+        ``True`` если удалён, ``False`` если не найден.
+    """
+    db_user = get_user(db, user_id)
+    if db_user is None:
+        return False
+
+    db.delete(db_user)
+    db.commit()
+    return True
+
+
+def delete_user_by_hash(db: Session, hash_id: str) -> bool:
+    """Удалить пользователя по публичному HASH-идентификатору.
+
+    Аргументы:
+        db:      Сессия базы данных.
+        hash_id: Публичный HASH-идентификатор.
+
+    Возвращает:
+        ``True`` если удалён, ``False`` если не найден.
+    """
+    db_user = get_user_by_hash_id(db, hash_id)
     if db_user is None:
         return False
 

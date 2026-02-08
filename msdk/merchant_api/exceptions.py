@@ -2,10 +2,11 @@
 
 
 class MerchantApiError(Exception):
-    def __init__(self, message, status_code=None, response=None):
+    def __init__(self, message, status_code=None, response=None, error_code=None):
         self.message = message
         self.status_code = status_code
         self.response = response or {}
+        self.error_code = error_code
         super().__init__(self.message)
 
 

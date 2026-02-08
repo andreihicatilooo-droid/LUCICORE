@@ -164,7 +164,7 @@ class WebClientApiClient:
         except ValueError:
             data = {"error": resp.text}
 
-        if resp.status_code in (200, 201, 202):
+        if resp.status_code in (200, 201, 202, 206):
             return data
         elif resp.status_code == 400:
             raise ValidationError(
@@ -197,8 +197,9 @@ class WebClientApiClient:
                 status_code=resp.status_code
             )
         raise MerchantApiError(
-            data.get("error") or data.get("text") or "Unknown error",
-            status_code=resp.status_code
+            data.get("error") or data.get("text") or f"Unknown error (HTTP {resp.status_code})",
+            status_code=resp.status_code,
+            response=data
         )
 
     # =========================================================================

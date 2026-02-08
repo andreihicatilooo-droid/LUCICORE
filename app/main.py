@@ -1,135 +1,303 @@
-"""FastAPI application with REST API endpoints."""
+"""
+Основное приложение LUCICORE API.
+
+FastAPI-приложение с REST-эндпоинтами для управления пользователями
+и интеграции с Merchant / Web Client API.
+
+Все публичные эндпоинты используют ``hash_id`` вместо числового ``id``
+для идентификации пользователей.
+"""
+import logging
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
 
 from app import crud, schemas
 from app.database import get_db, init_db
+from app.merchant_bridge import MerchantBridge
+from app.security import hash_password, require_bot_token
+
+logger = logging.getLogger(__name__)
+
+load_dotenv()
 
 
-# Lifespan context manager for startup/shutdown
+# ---------------------------------------------------------------------------
+# Жизненный цикл приложения
+# ---------------------------------------------------------------------------
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize database tables on startup."""
+    """Инициализация таблиц БД при старте сервера."""
     init_db()
     yield
 
 
-# Create FastAPI application
+# Создание экземпляра FastAPI
 app = FastAPI(
     title="LUCICORE API",
-    description="Database API for multiple services to connect",
+    description="Единый API-сервер для экосистемы ботов LUCICORE",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 
-# Root endpoint
+def get_merchant_bridge() -> MerchantBridge:
+    """Создать экземпляр MerchantBridge из переменных окружения."""
+    try:
+        return MerchantBridge.from_env()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+
+# =========================================================================
+# Корневой эндпоинт
+# =========================================================================
+
 @app.get("/")
 def read_root():
-    """Root endpoint with API information."""
+    """Корневой эндпоинт с общей информацией об API."""
     return {
-        "message": "Welcome to LUCICORE API",
+        "message": "Добро пожаловать в LUCICORE API",
         "version": "1.0.0",
         "endpoints": {
-            "items": "/items",
-            "services": "/services",
-            "health": "/health"
-        }
+            "users": "/users",
+            "user_by_hash": "/users/hash/{hash_id}",
+            "merchant_captcha": "/merchant/captcha",
+            "health": "/health",
+        },
     }
 
 
-# Health check endpoint
+# =========================================================================
+# Проверка здоровья
+# =========================================================================
+
 @app.get("/health")
 def health_check():
-    """Health check endpoint."""
+    """Эндпоинт проверки доступности сервера."""
     return {"status": "healthy"}
 
 
-# Item endpoints
-@app.post("/items/", response_model=schemas.Item, status_code=201)
-def create_item(item: schemas.ItemCreate, db: Session = Depends(get_db)):
-    """Create a new item."""
-    return crud.create_item(db=db, item=item)
+# =========================================================================
+# Эндпоинты пользователей
+# =========================================================================
+
+@app.post("/users/", response_model=schemas.User, status_code=201)
+def create_user(
+    user: schemas.UserCreate,
+    db: Session = Depends(get_db),
+    _caller: str = Depends(require_bot_token),
+):
+    """Создать нового пользователя.
+
+    ``hash_id`` генерируется автоматически и возвращается в ответе.
+    Требует Bearer-токен бота.
+    """
+    if crud.get_user_by_username(db, username=user.username):
+        raise HTTPException(status_code=400, detail="Имя пользователя уже занято")
+    if user.email and crud.get_user_by_email(db, email=user.email):
+        raise HTTPException(status_code=400, detail="E-mail уже используется")
+    password_hash = hash_password(user.password)
+    return crud.create_user(db=db, user=user, password_hash=password_hash)
 
 
-@app.get("/items/", response_model=List[schemas.Item])
-def read_items(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    """Get list of items."""
-    items = crud.get_items(db, skip=skip, limit=limit)
-    return items
+@app.get("/users/", response_model=List[schemas.User])
+def read_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    """Получить список пользователей с пагинацией."""
+    return crud.get_users(db, skip=skip, limit=limit)
 
 
-@app.get("/items/{item_id}", response_model=schemas.Item)
-def read_item(item_id: int, db: Session = Depends(get_db)):
-    """Get a specific item by ID."""
-    db_item = crud.get_item(db, item_id=item_id)
-    if db_item is None:
-        raise HTTPException(status_code=404, detail="Item not found")
-    return db_item
+@app.get("/users/{user_id}", response_model=schemas.User)
+def read_user(user_id: int, db: Session = Depends(get_db)):
+    """Получить пользователя по числовому ID (внутренний, для совместимости)."""
+    db_user = crud.get_user(db, user_id=user_id)
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    return db_user
 
 
-@app.put("/items/{item_id}", response_model=schemas.Item)
-def update_item(item_id: int, item: schemas.ItemUpdate, db: Session = Depends(get_db)):
-    """Update an existing item."""
-    db_item = crud.update_item(db, item_id=item_id, item=item)
-    if db_item is None:
-        raise HTTPException(status_code=404, detail="Item not found")
-    return db_item
+@app.get("/users/hash/{hash_id}", response_model=schemas.User)
+def read_user_by_hash(hash_id: str, db: Session = Depends(get_db)):
+    """Получить пользователя по публичному HASH-идентификатору.
+
+    Это основной способ идентификации пользователя в публичных запросах.
+    """
+    db_user = crud.get_user_by_hash_id(db, hash_id=hash_id)
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    return db_user
 
 
-@app.delete("/items/{item_id}")
-def delete_item(item_id: int, db: Session = Depends(get_db)):
-    """Delete an item."""
-    success = crud.delete_item(db, item_id=item_id)
+@app.put("/users/{user_id}", response_model=schemas.User)
+def update_user(
+    user_id: int,
+    user: schemas.UserUpdate,
+    db: Session = Depends(get_db),
+    _caller: str = Depends(require_bot_token),
+):
+    """Обновить пользователя по числовому ID. Требует Bearer-токен."""
+    if user.username:
+        existing = crud.get_user_by_username(db, username=user.username)
+        if existing and existing.id != user_id:
+            raise HTTPException(status_code=400, detail="Имя пользователя уже занято")
+    if user.email:
+        existing = crud.get_user_by_email(db, email=user.email)
+        if existing and existing.id != user_id:
+            raise HTTPException(status_code=400, detail="E-mail уже используется")
+    db_user = crud.update_user(db, user_id=user_id, user=user)
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    return db_user
+
+
+@app.put("/users/hash/{hash_id}", response_model=schemas.User)
+def update_user_by_hash(
+    hash_id: str,
+    user: schemas.UserUpdate,
+    db: Session = Depends(get_db),
+    _caller: str = Depends(require_bot_token),
+):
+    """Обновить пользователя по HASH-идентификатору. Требует Bearer-токен."""
+    if user.username:
+        existing = crud.get_user_by_username(db, username=user.username)
+        if existing and existing.hash_id != hash_id:
+            raise HTTPException(status_code=400, detail="Имя пользователя уже занято")
+    if user.email:
+        existing = crud.get_user_by_email(db, email=user.email)
+        if existing and existing.hash_id != hash_id:
+            raise HTTPException(status_code=400, detail="E-mail уже используется")
+    db_user = crud.update_user_by_hash(db, hash_id=hash_id, user=user)
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    return db_user
+
+
+@app.delete("/users/{user_id}")
+def delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    _caller: str = Depends(require_bot_token),
+):
+    """Удалить пользователя по числовому ID. Требует Bearer-токен."""
+    success = crud.delete_user(db, user_id=user_id)
     if not success:
-        raise HTTPException(status_code=404, detail="Item not found")
-    return {"message": "Item deleted successfully"}
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    return {"message": "Пользователь успешно удалён"}
 
 
-# Service endpoints
-@app.post("/services/", response_model=schemas.Service, status_code=201)
-def create_service(service: schemas.ServiceCreate, db: Session = Depends(get_db)):
-    """Create a new service."""
-    db_service = crud.get_service_by_name(db, name=service.name)
-    if db_service:
-        raise HTTPException(status_code=400, detail="Service with this name already exists")
-    return crud.create_service(db=db, service=service)
-
-
-@app.get("/services/", response_model=List[schemas.Service])
-def read_services(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    """Get list of services."""
-    services = crud.get_services(db, skip=skip, limit=limit)
-    return services
-
-
-@app.get("/services/{service_id}", response_model=schemas.Service)
-def read_service(service_id: int, db: Session = Depends(get_db)):
-    """Get a specific service by ID."""
-    db_service = crud.get_service(db, service_id=service_id)
-    if db_service is None:
-        raise HTTPException(status_code=404, detail="Service not found")
-    return db_service
-
-
-@app.put("/services/{service_id}", response_model=schemas.Service)
-def update_service(service_id: int, service: schemas.ServiceUpdate, db: Session = Depends(get_db)):
-    """Update an existing service."""
-    db_service = crud.update_service(db, service_id=service_id, service=service)
-    if db_service is None:
-        raise HTTPException(status_code=404, detail="Service not found")
-    return db_service
-
-
-@app.delete("/services/{service_id}")
-def delete_service(service_id: int, db: Session = Depends(get_db)):
-    """Delete a service."""
-    success = crud.delete_service(db, service_id=service_id)
+@app.delete("/users/hash/{hash_id}")
+def delete_user_by_hash(
+    hash_id: str,
+    db: Session = Depends(get_db),
+    _caller: str = Depends(require_bot_token),
+):
+    """Удалить пользователя по HASH-идентификатору. Требует Bearer-токен."""
+    success = crud.delete_user_by_hash(db, hash_id=hash_id)
     if not success:
-        raise HTTPException(status_code=404, detail="Service not found")
-    return {"message": "Service deleted successfully"}
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    return {"message": "Пользователь успешно удалён"}
+
+
+# =========================================================================
+# Эндпоинты Merchant API / Web Client API
+# =========================================================================
+
+@app.get("/merchant/captcha", response_model=schemas.MerchantCaptcha)
+def get_merchant_captcha(bridge: MerchantBridge = Depends(get_merchant_bridge)):
+    """Получить капчу для регистрации/входа в Web Client API."""
+    try:
+        data = bridge.get_captcha()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return schemas.MerchantCaptcha(captcha_id=data["captcha_id"], image=data["image"])
+
+
+@app.post("/users/{user_id}/merchant/register", response_model=schemas.MerchantLinkResponse)
+def register_user_with_merchant(
+    user_id: int,
+    payload: schemas.MerchantLinkRequest,
+    db: Session = Depends(get_db),
+    bridge: MerchantBridge = Depends(get_merchant_bridge),
+    _caller: str = Depends(require_bot_token),
+):
+    """Зарегистрировать пользователя в Web Client API и связать 1:1.
+
+    Требует Bearer-токен бота.  Возвращает ``hash_id``, ``merchant_client_id``
+    и ``auth_code`` для дальнейших операций.
+    """
+    db_user = crud.get_user(db, user_id=user_id)
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    try:
+        result = bridge.register_web_client(payload.captcha_id, payload.captcha_answer)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    profile = result.get("profile") or {}
+    db_user = crud.update_user_merchant_profile(
+        db=db,
+        user_id=user_id,
+        merchant_client_id=profile.get("pk"),
+        telegram_uid=profile.get("uid"),
+        balance=profile.get("balance"),
+        first_name=profile.get("first_name"),
+        last_name=profile.get("last_name"),
+        avatar=profile.get("avatar"),
+        session_token=result.get("token"),
+    )
+    if db_user is None or db_user.merchant_client_id is None:
+        raise HTTPException(status_code=502, detail="Не удалось привязать профиль Merchant API")
+
+    auth_code = result.get("auth_code")
+    if not auth_code:
+        raise HTTPException(status_code=502, detail="Merchant API не вернул auth_code")
+
+    return schemas.MerchantLinkResponse(
+        hash_id=db_user.hash_id,
+        merchant_client_id=db_user.merchant_client_id,
+        auth_code=auth_code,
+    )
+
+
+@app.post("/users/{user_id}/merchant/sync", response_model=schemas.User)
+def sync_user_from_merchant(
+    user_id: int,
+    db: Session = Depends(get_db),
+    bridge: MerchantBridge = Depends(get_merchant_bridge),
+    _caller: str = Depends(require_bot_token),
+):
+    """Синхронизировать профиль пользователя из Web Client API в локальную БД.
+
+    Требует Bearer-токен бота.
+    """
+    db_user = crud.get_user(db, user_id=user_id)
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    if not db_user.session_token:
+        raise HTTPException(status_code=400, detail="Пользователь не привязан к Web Client API")
+
+    try:
+        profile = bridge.get_profile(db_user.session_token)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    db_user = crud.update_user_merchant_profile(
+        db=db,
+        user_id=user_id,
+        merchant_client_id=profile.get("pk"),
+        telegram_uid=profile.get("uid"),
+        balance=profile.get("balance"),
+        first_name=profile.get("first_name"),
+        last_name=profile.get("last_name"),
+        avatar=profile.get("avatar"),
+    )
+    if db_user is None:
+        raise HTTPException(status_code=502, detail="Не удалось синхронизировать профиль")
+    return db_user
 
 
 if __name__ == "__main__":

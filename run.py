@@ -5,6 +5,10 @@ For development, set RELOAD=true environment variable.
 """
 import os
 import uvicorn
+from dotenv import load_dotenv
+
+
+load_dotenv()
 
 if __name__ == "__main__":
     reload = os.getenv("RELOAD", "false").lower() == "true"
