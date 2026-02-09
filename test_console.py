@@ -127,11 +127,11 @@ def print_user_table(users: list[dict]):
         f"{'hash_id':<{h_w + 2}} "
         f"{'username':<{n_w + 2}} "
         f"{'email':<22} "
-        f"{'active':>7} "
+        f"{'status':>10} "
         f"{'balance':>9}"
         f"{C.RESET}"
     )
-    sep = f"  {C.DIM}{'─' * (4 + h_w + n_w + 22 + 7 + 9 + 12)}{C.RESET}"
+    sep = f"  {C.DIM}{'─' * (4 + h_w + n_w + 22 + 10 + 9 + 12)}{C.RESET}"
 
     print(hdr)
     print(sep)
@@ -141,14 +141,20 @@ def print_user_table(users: list[dict]):
         email = u.get("email") or "—"
         if len(email) > 20:
             email = email[:18] + "…"
-        active = f"{C.GREEN}да{C.RESET}" if u.get("is_active") else f"{C.RED}нет{C.RESET}"
+        status = u.get("status", "—")
+        if status == "active":
+            status_colored = f"{C.GREEN}{status}{C.RESET}"
+        elif status in ("blocked", "deleted"):
+            status_colored = f"{C.RED}{status}{C.RESET}"
+        else:
+            status_colored = f"{C.YELLOW}{status}{C.RESET}"
         balance = u.get("balance", 0.0)
         print(
             f"  {C.DIM}{i:<4}{C.RESET} "
             f"{C.CYAN}{hid:<{h_w + 2}}{C.RESET} "
             f"{C.WHITE}{name:<{n_w + 2}}{C.RESET} "
             f"{email:<22} "
-            f"{active:>16} "
+            f"{status_colored:>19} "
             f"{C.YELLOW}{balance:>9.2f}{C.RESET}"
         )
 
@@ -280,6 +286,10 @@ async def cmd_get_user_by_hash(client: LucicoreClient):
 async def cmd_create_user(client: LucicoreClient):
     """6 — Создать пользователя."""
     print_header("Создать пользователя  POST /users/")
+    login = prompt("login (обязательно)")
+    if not login:
+        print_error("login не может быть пустым")
+        return
     username = prompt("username (обязательно)")
     if not username:
         print_error("username не может быть пустым")
@@ -289,21 +299,18 @@ async def cmd_create_user(client: LucicoreClient):
         print_error("password не может быть пустым")
         return
     email = prompt("email (необязательно)")
-    first_name = prompt("first_name (необязательно)")
-    last_name = prompt("last_name (необязательно)")
+    display_name = prompt("display_name (необязательно)")
     avatar = prompt("avatar URL (необязательно)")
 
     kwargs: dict[str, Any] = {}
     if email:
         kwargs["email"] = email
-    if first_name:
-        kwargs["first_name"] = first_name
-    if last_name:
-        kwargs["last_name"] = last_name
+    if display_name:
+        kwargs["display_name"] = display_name
     if avatar:
         kwargs["avatar"] = avatar
 
-    result = await client.create_user(username=username, password=password, **kwargs)
+    result = await client.create_user(login=login, username=username, password=password, **kwargs)
     print()
     print_json(result)
     print_success(f"Создан пользователь: {result.get('username')}  hash_id={result.get('hash_id')}")
@@ -351,27 +358,27 @@ async def cmd_update_user_by_hash(client: LucicoreClient):
 def _collect_update_fields() -> dict[str, Any]:
     """Собрать поля для обновления через ввод."""
     fields: dict[str, Any] = {}
+    login = prompt("login")
+    if login:
+        fields["login"] = login
     username = prompt("username")
     if username:
         fields["username"] = username
+    status = prompt("status (active/blocked/on_review/logged_out/deleted)")
+    if status:
+        fields["status"] = status
+    astatus = prompt("astatus (lord/demon/imp/none)")
+    if astatus:
+        fields["astatus"] = astatus
+    display_name = prompt("display_name")
+    if display_name:
+        fields["display_name"] = display_name
     email = prompt("email")
     if email:
         fields["email"] = email
-    first_name = prompt("first_name")
-    if first_name:
-        fields["first_name"] = first_name
-    last_name = prompt("last_name")
-    if last_name:
-        fields["last_name"] = last_name
     avatar = prompt("avatar")
     if avatar:
         fields["avatar"] = avatar
-    is_active = prompt("is_active (true/false)")
-    if is_active:
-        fields["is_active"] = is_active.lower() in ("true", "1", "да", "yes")
-    is_verified = prompt("is_verified (true/false)")
-    if is_verified:
-        fields["is_verified"] = is_verified.lower() in ("true", "1", "да", "yes")
     return fields
 
 
@@ -468,12 +475,13 @@ async def cmd_bulk_create(client: LucicoreClient):
     for i in range(1, n + 1):
         ts = int(time.time() * 1000) % 100000
         username = f"{prefix}_{ts}_{i}"
+        login = f"{prefix}_login_{ts}_{i}"
         try:
             result = await client.create_user(
+                login=login,
                 username=username,
                 password=password,
                 email=f"{username}@test.local",
-                first_name=f"Тест-{i}",
             )
             hid = result.get("hash_id", "???")
             print(f"  {C.GREEN}✔{C.RESET} [{i}/{n}] {C.CYAN}{username}{C.RESET}  →  hash_id={C.MAGENTA}{hid}{C.RESET}")

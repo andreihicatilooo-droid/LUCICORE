@@ -203,20 +203,21 @@ class LucicoreClient:
         """
         return await self._get(f"/users/{user_id}")
 
-    async def create_user(self, *, username: str, password: str, **kwargs: Any) -> Dict[str, Any]:
+    async def create_user(self, *, login: str, username: str, password: str, **kwargs: Any) -> Dict[str, Any]:
         """Создать нового пользователя.
 
         ``hash_id`` генерируется сервером автоматически и возвращается в ответе.
 
         Аргументы:
+            login:    Уникальный логин пользователя.
             username: Уникальное имя пользователя.
             password: Пароль в открытом виде.
-            **kwargs: Дополнительные поля (email, first_name, last_name, avatar).
+            **kwargs: Дополнительные поля (email, display_name, avatar).
 
         Возвращает:
             Словарь с данными созданного пользователя (включая ``hash_id``).
         """
-        payload = {"username": username, "password": password, **kwargs}
+        payload = {"login": login, "username": username, "password": password, **kwargs}
         return await self._post("/users/", json=payload)
 
     async def update_user(self, user_id: int, **fields: Any) -> Dict[str, Any]:
@@ -245,7 +246,7 @@ class LucicoreClient:
         Это основной и рекомендуемый способ идентификации пользователей.
 
         Аргументы:
-            hash_id: Уникальный HASH-идентификатор (22 символа).
+            hash_id: UUID v4 идентификатор (36 символов).
 
         Возвращает:
             Словарь с данными пользователя.
@@ -256,10 +257,10 @@ class LucicoreClient:
         return await self._get(f"/users/hash/{hash_id}")
 
     async def update_user_by_hash(self, hash_id: str, **fields: Any) -> Dict[str, Any]:
-        """Обновить пользователя по HASH-идентификатору.
+        """Обновить пользователя по UUID v4 идентификатору.
 
         Аргументы:
-            hash_id:  Уникальный HASH-идентификатор.
+            hash_id:  UUID v4 идентификатор.
             **fields: Поля для обновления.
 
         Возвращает:
@@ -268,10 +269,10 @@ class LucicoreClient:
         return await self._put(f"/users/hash/{hash_id}", json=fields)
 
     async def delete_user_by_hash(self, hash_id: str) -> Dict[str, Any]:
-        """Удалить пользователя по HASH-идентификатору.
+        """Удалить пользователя по UUID v4 идентификатору.
 
         Аргументы:
-            hash_id: Уникальный HASH-идентификатор.
+            hash_id: UUID v4 идентификатор.
 
         Возвращает:
             ``{"message": "Пользователь успешно удалён"}``.

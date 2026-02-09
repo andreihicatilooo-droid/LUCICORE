@@ -5,8 +5,7 @@
 Для смены СУБД достаточно установить переменную окружения ``DATABASE_URL``.
 """
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker
 import os
 
 # URL подключения к БД — по умолчанию SQLite

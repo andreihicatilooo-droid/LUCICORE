@@ -3,7 +3,7 @@ CRUD-операции для базы данных LUCICORE.
 
 Содержит функции создания, чтения, обновления и удаления
 пользователей.  Поиск возможен по числовому ``id``, ``hash_id``,
-``username``, ``email``, ``merchant_client_id`` и ``telegram_uid``.
+``login``, ``username``, ``email``, ``merchant_client_id`` и ``telegram_uid``.
 """
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -34,7 +34,7 @@ def get_user_by_hash_id(db: Session, hash_id: str) -> Optional[models.User]:
 
     Аргументы:
         db:      Сессия базы данных.
-        hash_id: Уникальный HASH-идентификатор (22 символа).
+        hash_id: UUID v4 идентификатор (36 символов).
 
     Возвращает:
         Объект ``User`` или ``None``.
@@ -53,6 +53,19 @@ def get_user_by_username(db: Session, username: str) -> Optional[models.User]:
         Объект ``User`` или ``None``.
     """
     return db.query(models.User).filter(models.User.username == username).first()
+
+
+def get_user_by_login(db: Session, login: str) -> Optional[models.User]:
+    """Получить пользователя по логину.
+
+    Аргументы:
+        db:    Сессия базы данных.
+        login: Уникальный логин пользователя.
+
+    Возвращает:
+        Объект ``User`` или ``None``.
+    """
+    return db.query(models.User).filter(models.User.login == login).first()
 
 
 def get_user_by_email(db: Session, email: str) -> Optional[models.User]:
@@ -133,6 +146,11 @@ def create_user(db: Session, user: schemas.UserCreate, password_hash: str) -> mo
     ``hash_id`` генерируется автоматически через SQLAlchemy-событие
     ``before_insert`` (см. ``models.py``).
 
+    Прокси-поля (``email``, ``display_name``, ``avatar``) передаются
+    в ``User`` через сеттеры, которые лениво создают связанные записи
+    (``UserSetting``).  Поля, не установленные клиентом, пропускаются
+    благодаря ``exclude_unset=True``.
+
     Аргументы:
         db:            Сессия базы данных.
         user:          Данные для создания (схема ``UserCreate``).
@@ -141,7 +159,7 @@ def create_user(db: Session, user: schemas.UserCreate, password_hash: str) -> mo
     Возвращает:
         Созданный объект ``User`` с заполненным ``hash_id``.
     """
-    user_data = user.model_dump(exclude={"password"})
+    user_data = user.model_dump(exclude={"password"}, exclude_unset=True)
     db_user = models.User(**user_data, password_hash=password_hash)
     db.add(db_user)
     db.commit()
@@ -182,7 +200,7 @@ def update_user_by_hash(db: Session, hash_id: str, user: schemas.UserUpdate) -> 
 
     Аргументы:
         db:      Сессия базы данных.
-        hash_id: Публичный HASH-идентификатор.
+        hash_id: UUID v4 идентификатор.
         user:    Данные для обновления (схема ``UserUpdate``).
 
     Возвращает:
@@ -304,14 +322,21 @@ def update_user_merchant_profile(
 ) -> Optional[models.User]:
     """Обновить профиль пользователя из данных Merchant API.
 
+    Прокси-поля (``merchant_client_id``, ``telegram_uid``, ``balance``,
+    ``session_token``, ``avatar``) устанавливаются через сеттеры ``User``,
+    которые делегируют запись в ``UserMSDK`` / ``UserTG`` / ``UserSetting``.
+
+    ``first_name`` и ``last_name`` записываются напрямую в ``UserTG``,
+    так как на ``User`` для них нет прокси-свойств.
+
     Аргументы:
         db:                 Сессия базы данных.
         user_id:            Числовой ID пользователя.
         merchant_client_id: ID клиента в Merchant API.
         telegram_uid:       UID пользователя в Telegram.
         balance:            Баланс.
-        first_name:         Имя.
-        last_name:          Фамилия.
+        first_name:         Имя (Telegram-профиль → UserTG).
+        last_name:          Фамилия (Telegram-профиль → UserTG).
         avatar:             URL аватара.
         session_token:      Сессионный токен Merchant API.
 
@@ -322,20 +347,27 @@ def update_user_merchant_profile(
     if db_user is None:
         return None
 
+    # Прокси → UserMSDK
     if merchant_client_id is not None:
         db_user.merchant_client_id = merchant_client_id
-    if telegram_uid is not None:
-        db_user.telegram_uid = telegram_uid
     if balance is not None:
         db_user.balance = balance
-    if first_name is not None:
-        db_user.first_name = first_name
-    if last_name is not None:
-        db_user.last_name = last_name
-    if avatar is not None:
-        db_user.avatar = avatar
     if session_token is not None:
         db_user.session_token = session_token
+
+    # Прокси → UserTG
+    if telegram_uid is not None:
+        db_user.telegram_uid = telegram_uid
+
+    # Напрямую → UserTG (нет прокси на User)
+    if first_name is not None:
+        db_user._ensure_tg().first_name = first_name
+    if last_name is not None:
+        db_user._ensure_tg().last_name = last_name
+
+    # Прокси → UserSetting
+    if avatar is not None:
+        db_user.avatar = avatar
 
     db.commit()
     db.refresh(db_user)
@@ -366,11 +398,11 @@ def delete_user(db: Session, user_id: int) -> bool:
 
 
 def delete_user_by_hash(db: Session, hash_id: str) -> bool:
-    """Удалить пользователя по публичному HASH-идентификатору.
+    """Удалить пользователя по UUID v4 идентификатору.
 
     Аргументы:
         db:      Сессия базы данных.
-        hash_id: Публичный HASH-идентификатор.
+        hash_id: UUID v4 идентификатор.
 
     Возвращает:
         ``True`` если удалён, ``False`` если не найден.

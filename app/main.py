@@ -114,6 +114,8 @@ def create_user(
     ``hash_id`` генерируется автоматически и возвращается в ответе.
     Требует Bearer-токен бота.
     """
+    if crud.get_user_by_login(db, login=user.login):
+        raise HTTPException(status_code=400, detail="Логин уже занят")
     if crud.get_user_by_username(db, username=user.username):
         raise HTTPException(status_code=400, detail="Имя пользователя уже занято")
     if user.email and crud.get_user_by_email(db, email=user.email):
@@ -157,6 +159,10 @@ def update_user(
     _caller: str = Depends(require_bot_token),
 ):
     """Обновить пользователя по числовому ID. Требует Bearer-токен."""
+    if user.login:
+        existing = crud.get_user_by_login(db, login=user.login)
+        if existing and existing.id != user_id:
+            raise HTTPException(status_code=400, detail="Логин уже занят")
     if user.username:
         existing = crud.get_user_by_username(db, username=user.username)
         if existing and existing.id != user_id:
@@ -179,6 +185,10 @@ def update_user_by_hash(
     _caller: str = Depends(require_bot_token),
 ):
     """Обновить пользователя по HASH-идентификатору. Требует Bearer-токен."""
+    if user.login:
+        existing = crud.get_user_by_login(db, login=user.login)
+        if existing and existing.hash_id != hash_id:
+            raise HTTPException(status_code=400, detail="Логин уже занят")
     if user.username:
         existing = crud.get_user_by_username(db, username=user.username)
         if existing and existing.hash_id != hash_id:

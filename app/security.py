@@ -14,6 +14,7 @@ import logging
 import os
 import secrets
 import time
+import uuid
 from typing import Optional
 
 from fastapi import Depends, HTTPException, status
@@ -67,25 +68,17 @@ def verify_password(password: str, stored_hash: str) -> bool:
 # Генерация уникальных HASH-идентификаторов
 # ---------------------------------------------------------------------------
 
-def generate_hash_id(nbytes: int = 16) -> str:
-    """Сгенерировать криптографически стойкий уникальный HASH-идентификатор.
+def generate_hash_id() -> str:
+    """Сгенерировать уникальный идентификатор пользователя (UUID v4).
 
     Используется как публичный идентификатор пользователя вместо
-    последовательного числового ID.  Результат — URL-safe Base64 строка.
-
-    Аргументы:
-        nbytes: Количество случайных байт (по умолчанию 16 → 22 символа).
-                Чем больше — тем длиннее и уникальнее хеш.
+    последовательного числового ID.  Результат — каноническая строка
+    UUID v4 длиной 36 символов (8-4-4-4-12).
 
     Возвращает:
-        URL-safe строку длиной ~``ceil(nbytes * 4/3)`` символов
-        (22 символа при ``nbytes=16``).
-
-    Пример:
-        >>> generate_hash_id()
-        'Kf3xQ7pLmN8w0Zv1cYtBgA'
+        Строку UUID v4 (например ``'550e8400-e29b-41d4-a716-446655440000'``).
     """
-    return secrets.token_urlsafe(nbytes)
+    return str(uuid.uuid4())
 
 
 def generate_deterministic_hash(*parts: str, length: int = 16) -> str:

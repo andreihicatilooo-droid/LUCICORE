@@ -2,33 +2,36 @@
 Pydantic-схемы валидации LUCICORE API.
 
 Определяет модели для входных и выходных данных всех эндпоинтов.
-Публичные ответы содержат ``hash_id`` вместо числового ``id``.
+Публичные ответы содержат ``hash_id`` (UUID v4) вместо числового ``id``.
+
+Структура файла:
+    • Схемы пользователя        — UserDatabase, UserBase, UserCreate, UserUpdate, …
+    • Схемы Merchant / Web Client — MerchantCaptcha, MerchantLinkRequest, …
 """
 from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 from typing import Optional
 
 
-# ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
 # Схемы пользователя
-# ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
 
 class UserDatabase(BaseModel):
     """Полная схема пользователя в базе данных (внутреннее использование).
 
     Включает числовой ``id`` — используется ТОЛЬКО внутри сервера.
+    Все поля соответствуют прямым атрибутам и прокси-свойствам ``models.User``.
     """
     id: int
     hash_id: str
+    login: str
     username: str
     status: str
+    astatus: str
     display_name: Optional[str] = None
     email: Optional[str] = None
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
     avatar: Optional[str] = None
-    is_active: bool
-    is_verified: bool
     balance: float
     merchant_client_id: Optional[int] = None
     telegram_uid: Optional[str] = None
@@ -40,25 +43,27 @@ class UserDatabase(BaseModel):
 
 
 class UserBase(BaseModel):
-    """Базовая схема пользователя (общие поля).
+    """Базовая схема пользователя (общие поля для создания и ответа).
 
     Атрибуты:
-        username:   Уникальное имя пользователя.
-        email:      E-mail (опционально).
-        first_name: Имя.
-        last_name:  Фамилия.
-        avatar:     URL аватара.
+        login:        Уникальное имя для входа.
+        username:     Уникальное отображаемое имя.
+        display_name: Альтернативное отображаемое имя (опционально).
+        email:        E-mail (опционально).
+        avatar:       URL аватара (опционально).
     """
+    login: str
     username: str
     display_name: Optional[str] = None
     email: Optional[str] = None
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
     avatar: Optional[str] = None
 
 
 class UserCreate(UserBase):
     """Схема создания пользователя.
+
+    Обязательные поля: ``login``, ``username``, ``password``.
+    Остальные (``email``, ``display_name``, ``avatar``) — опциональны.
 
     Атрибуты:
         password: Пароль в открытом виде (будет захеширован на сервере).
@@ -70,26 +75,33 @@ class UserUpdate(BaseModel):
     """Схема обновления пользователя.
 
     Все поля опциональны — передаются только изменяемые.
+
+    Атрибуты:
+        login:        Новый логин.
+        username:     Новое имя пользователя.
+        status:       Статус аккаунта (active, blocked, …).
+        astatus:      Статус администратора (lord, demon, imp, none).
+        display_name: Отображаемое имя.
+        email:        E-mail.
+        avatar:       URL аватара.
     """
+    login: Optional[str] = None
     username: Optional[str] = None
     status: Optional[str] = None
+    astatus: Optional[str] = None
     display_name: Optional[str] = None
     email: Optional[str] = None
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
     avatar: Optional[str] = None
-    is_active: Optional[bool] = None
-    is_verified: Optional[bool] = None
 
 
 class UserLogin(BaseModel):
     """Схема входа пользователя.
 
     Атрибуты:
-        username: Имя пользователя.
+        login:    Логин пользователя.
         password: Пароль в открытом виде.
     """
-    username: str
+    login: str
     password: str
 
 
@@ -104,9 +116,9 @@ class UserBalanceUpdate(BaseModel):
     operation: str = "add"  # "add" или "subtract"
 
 
-# ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
 # Схемы Merchant API / Web Client API
-# ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
 
 class MerchantCaptcha(BaseModel):
     """Данные капчи Web Client API.
@@ -149,7 +161,7 @@ class MerchantLinkResponse(BaseModel):
     """Ответ после привязки пользователя к Web Client API.
 
     Атрибуты:
-        hash_id:            Публичный HASH-идентификатор пользователя.
+        hash_id:            Публичный UUID v4 идентификатор пользователя.
         merchant_client_id: ID клиента в Merchant API.
         auth_code:          Код авторизации для дальнейших операций.
     """
@@ -161,13 +173,13 @@ class MerchantLinkResponse(BaseModel):
 class User(UserBase):
     """Публичная схема ответа пользователя.
 
-    Содержит ``hash_id`` вместо числового ``id`` — это публичный
+    Содержит ``hash_id`` (UUID v4) вместо числового ``id`` — это публичный
     уникальный идентификатор, безопасный для передачи клиенту.
 
     Атрибуты:
-        hash_id:            Уникальный HASH-идентификатор (22 символа).
-        is_active:          Активен ли аккаунт.
-        is_verified:        Подтверждён ли аккаунт.
+        hash_id:            UUID v4 идентификатор (36 символов).
+        status:             Статус аккаунта.
+        astatus:            Статус администратора.
         balance:            Баланс пользователя.
         merchant_client_id: ID клиента в Merchant API.
         telegram_uid:       UID в Telegram.
@@ -176,9 +188,8 @@ class User(UserBase):
         last_login:         Дата последнего входа.
     """
     hash_id: str
-    is_active: bool
-    is_verified: bool
     status: str
+    astatus: str
     balance: float
     merchant_client_id: Optional[int] = None
     telegram_uid: Optional[str] = None
