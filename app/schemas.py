@@ -108,10 +108,12 @@ class MerchantCaptcha(BaseModel):
 
     Атрибуты:
         captcha_id: Идентификатор капчи.
-        image:      Base64-изображение капчи.
+        image:      Base64-изображение капчи (data:image/png;base64,…).
+        image_url:  Прямая ссылка на PNG-файл капчи на сервере.
     """
     captcha_id: str
     image: str
+    image_url: str
 
 
 class MerchantLinkRequest(BaseModel):
