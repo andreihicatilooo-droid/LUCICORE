@@ -65,7 +65,12 @@ def get_user_by_email(db: Session, email: str) -> Optional[models.User]:
     Возвращает:
         Объект ``User`` или ``None``.
     """
-    return db.query(models.User).filter(models.User.email == email).first()
+    return (
+        db.query(models.User)
+        .join(models.UserSetting)
+        .filter(models.UserSetting.email == email)
+        .first()
+    )
 
 
 def get_user_by_merchant_client_id(db: Session, merchant_client_id: int) -> Optional[models.User]:
@@ -78,7 +83,12 @@ def get_user_by_merchant_client_id(db: Session, merchant_client_id: int) -> Opti
     Возвращает:
         Объект ``User`` или ``None``.
     """
-    return db.query(models.User).filter(models.User.merchant_client_id == merchant_client_id).first()
+    return (
+        db.query(models.User)
+        .join(models.UserMSDK)
+        .filter(models.UserMSDK.merchant_client_id == merchant_client_id)
+        .first()
+    )
 
 
 def get_user_by_telegram_uid(db: Session, telegram_uid: str) -> Optional[models.User]:
@@ -91,7 +101,12 @@ def get_user_by_telegram_uid(db: Session, telegram_uid: str) -> Optional[models.
     Возвращает:
         Объект ``User`` или ``None``.
     """
-    return db.query(models.User).filter(models.User.telegram_uid == telegram_uid).first()
+    return (
+        db.query(models.User)
+        .join(models.UserTG)
+        .filter(models.UserTG.telegram_uid == telegram_uid)
+        .first()
+    )
 
 
 def get_users(db: Session, skip: int = 0, limit: int = 100) -> List[models.User]:
@@ -202,10 +217,11 @@ def update_user_balance(db: Session, user_id: int, amount: float, operation: str
     if db_user is None:
         return None
 
+    current_balance = db_user.balance
     if operation == "add":
-        db_user.balance += amount
+        db_user.balance = current_balance + amount
     elif operation == "subtract":
-        db_user.balance -= amount
+        db_user.balance = current_balance - amount
 
     db.commit()
     db.refresh(db_user)
