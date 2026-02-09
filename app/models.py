@@ -17,7 +17,7 @@
 """
 from enum import Enum
 
-from sqlalchemy import Column, Integer, String, DateTime, Numeric, event, ForeignKey, Boolean, Enum as SqlEnum, UniqueConstraint
+from sqlalchemy import Column, Integer, String, DateTime, Numeric, event, ForeignKey, Enum as SqlEnum, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -38,8 +38,18 @@ USER_STATUS_DELETED = "deleted"
 # --- Статусы администратора ---
 ADMIN_STATUS_LORD = "lord"
 ADMIN_STATUS_DEMON = "demon"
-ADMIN_STATS_IMP = "imp"
+ADMIN_STATUS_IMP = "imp"
 ADMIN_STATUS_NONE = "none"
+
+
+# --- Общий перечень ролей (используется в UserRole, UserRanksConfig) ---
+class RoleEnum(str, Enum):
+    """Роли пользователей в системе."""
+    user = "user"
+    buyer = "buyer"
+    seller = "seller"
+    servicer = "servicer"
+    admin = "admin"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -124,16 +134,12 @@ class User(Base):
     # --- Связи: история и логи (блок 6) ---
     password_logs = relationship(
         "PasswordChangeLog",
+        foreign_keys="[PasswordChangeLog.user_id]",
         back_populates="user",
         cascade="all, delete-orphan",
     )
     tg_auth_logs = relationship(
         "TelegramAuthLog",
-        back_populates="user",
-        cascade="all, delete-orphan",
-    )
-    audit_logs = relationship(
-        "AuditLog",
         back_populates="user",
         cascade="all, delete-orphan",
     )
@@ -327,13 +333,6 @@ class UserRole(Base):
         UniqueConstraint("user_id", "role", name="uq_user_role"),
     )
 
-    class RoleEnum(str, Enum):
-        user = "user"
-        buyer = "buyer"
-        seller = "seller"
-        servicer = "servicer"
-        admin = "admin"
-
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     role = Column(SqlEnum(RoleEnum, name="user_role_type"), nullable=False, index=True)
@@ -363,16 +362,12 @@ class UserRanksConfig(Base):
         benefits_json:  Бонусы в формате JSONB.
     """
     __tablename__ = "user_ranks_config"
-
-    class Role(str, Enum):
-        user = "user"
-        buyer = "buyer"
-        seller = "seller"
-        servicer = "servicer"
-        admin = "admin"
+    __table_args__ = (
+        UniqueConstraint("role", "rank_level", name="uq_rank_role_level"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    role = Column(SqlEnum(Role, name="user_rank_role"), nullable=False, index=True)
+    role = Column(SqlEnum(RoleEnum, name="user_rank_role"), nullable=False, index=True)
     rank_level = Column(Integer, nullable=False, index=True)
     rank_name = Column(String(255), nullable=False, unique=True)
     min_exp = Column(Integer, nullable=False)
@@ -531,7 +526,7 @@ class AuditLog(Base):
     details_json = Column(JSONB, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
-    user = relationship("User", back_populates="audit_logs")
+    user = relationship("User")
 
     def __repr__(self) -> str:
         return f"<AuditLog(user_id={self.user_id!r}, action={self.action!r}, at={self.created_at!r})>"
