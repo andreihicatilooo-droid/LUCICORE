@@ -12,7 +12,7 @@
     3. Интеграции             — UserMSDK, UserTG
     4. Роли и ранги           — UserRole, UserRanksConfig
     5. Репутация и статистика  — UserReputation, UserMessageLog
-    6. История и логи          — (TODO) логи паролей, входов, действий
+    6. История и логи          — PasswordChangeLog, TelegramAuthLog, AuditLog
     7. События SQLAlchemy
 """
 from enum import Enum
@@ -121,7 +121,22 @@ class User(Base):
         cascade="all, delete-orphan",
     )
 
-    # --- Связи: история и логи (блок 6) — TODO ---
+    # --- Связи: история и логи (блок 6) ---
+    password_logs = relationship(
+        "PasswordChangeLog",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    tg_auth_logs = relationship(
+        "TelegramAuthLog",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    audit_logs = relationship(
+        "AuditLog",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
 
     # ----- Хелперы для ленивой инициализации связей -----
 
@@ -444,6 +459,82 @@ class UserMessageLog(Base):
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+class PasswordChangeLog(Base):
+    """Лог смены паролей.
+
+    Каждая строка — факт смены или сброса пароля.
+
+    Атрибуты:
+        user_id:       FK → users.
+        changed_by:    Кто инициировал (FK → users, NULL = сам пользователь).
+        reason:        Причина ('user_change', 'admin_reset', 'forgot').
+        created_at:    Время события.
+    """
+    __tablename__ = "password_change_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    changed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reason = Column(String(32), nullable=False, default="user_change")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    user = relationship("User", foreign_keys=[user_id], back_populates="password_logs")
+    changer = relationship("User", foreign_keys=[changed_by])
+
+    def __repr__(self) -> str:
+        return f"<PasswordChangeLog(user_id={self.user_id!r}, reason={self.reason!r}, at={self.created_at!r})>"
+
+
+class TelegramAuthLog(Base):
+    """История входов / авторизаций через Telegram.
+
+    Атрибуты:
+        user_id:        FK → users.
+        telegram_uid:   UID Telegram на момент входа.
+        action:         Действие ('login', 'link', 'unlink').
+        created_at:     Время события.
+    """
+    __tablename__ = "telegram_auth_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    telegram_uid = Column(String(255), nullable=True)
+    action = Column(String(32), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    user = relationship("User", back_populates="tg_auth_logs")
+
+    def __repr__(self) -> str:
+        return f"<TelegramAuthLog(user_id={self.user_id!r}, action={self.action!r}, at={self.created_at!r})>"
+
+
+class AuditLog(Base):
+    """Журнал действий пользователя (audit log).
+
+    Универсальная таблица для записи любых значимых событий.
+
+    Атрибуты:
+        user_id:      FK → users (кто совершил действие).
+        action:       Код действия ('profile_update', 'role_change', 'login', …).
+        entity_type:  Тип затронутой сущности ('user', 'order', …).
+        entity_id:    ID затронутой сущности (строка для универсальности).
+        details_json: Подробности в JSONB (old/new значения, метаданные).
+        created_at:   Время события.
+    """
+    __tablename__ = "audit_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    action = Column(String(64), nullable=False, index=True)
+    entity_type = Column(String(64), nullable=True, index=True)
+    entity_id = Column(String(64), nullable=True)
+    details_json = Column(JSONB, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    user = relationship("User", back_populates="audit_logs")
+
+    def __repr__(self) -> str:
+        return f"<AuditLog(user_id={self.user_id!r}, action={self.action!r}, at={self.created_at!r})>"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
