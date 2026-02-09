@@ -4,18 +4,47 @@
 Определяет SQLAlchemy-модели для всех таблиц.
 Каждая сущность получает уникальный ``hash_id`` — публичный
 идентификатор, используемый вместо числового ``id`` в API.
+
+Структура файла (блоки):
+    0. Импорты и константы
+    1. Ядро пользователя     — User
+    2. Профиль и настройки    — UserSetting
+    3. Интеграции             — UserMSDK, UserTG
+    4. Роли и ранги           — UserRole (TODO), UserRanksConfig
+    5. Репутация и статистика  — UserReputation (TODO), UserStats (TODO)
+    6. История и логи          — (TODO) логи паролей, входов, действий
+    7. События SQLAlchemy
 """
-from sqlalchemy import Column, Integer, String, DateTime, Text, Float, event, ForeignKey, Boolean
+from enum import Enum
+
+from sqlalchemy import Column, Integer, String, DateTime, Numeric, event, ForeignKey, Boolean, Enum as SqlEnum
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 0. КОНСТАНТЫ
+# ═══════════════════════════════════════════════════════════════════════════
+
+# --- Статусы аккаунта пользователя ---
 USER_STATUS_ACTIVE = "active"
 USER_STATUS_LOGGED_OUT = "logged_out"
 USER_STATUS_ON_REVIEW = "on_review"
 USER_STATUS_BLOCKED = "blocked"
 USER_STATUS_DELETED = "deleted"
 
+# --- Статусы администратора ---
+ADMIN_STATUS_LORD = "lord"
+ADMIN_STATUS_DEMON = "demon"
+ADMIN_STATS_IMP = "imp"
+ADMIN_STATUS_NONE = "none"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 1. ЯДРО ПОЛЬЗОВАТЕЛЯ
+# ═══════════════════════════════════════════════════════════════════════════
 
 class User(Base):
     """Модель пользователя.
@@ -25,12 +54,11 @@ class User(Base):
     Атрибуты:
         id:                  Внутренний числовой PK (не отдаётся наружу).
         hash_id:             UUID v4. Как строка (универсально).
-        login:               Логин (уникальный). мин 5 макс 15 символов.
-        username:            Уникальное имя пользователя (мин 5 макс 20 символов).
-        display_name:        Отображаемое имя (необязательно, мин 3 макс 30 символов).
-
+        login:               Уникальное имя для входа.
+        username:            Уникальное отображаемое имя.
         password_hash:       Хеш пароля (PBKDF2-SHA256).
         status:              Статус аккаунта.
+        astatus:             Статус администратора (для админов).
         created_at:          Дата создания.
         updated_at:          Дата последнего обновления.
         last_login:          Дата последнего входа.
@@ -38,40 +66,27 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    hash_id = Column(String(32), unique=True, nullable=False, index=True)
+    hash_id = Column(String(36), unique=True, nullable=False, index=True)
+    login = Column(String(255), nullable=False, unique=True, index=True)
     username = Column(String(255), nullable=False, unique=True, index=True)
-    email = Column(String(255), nullable=True, unique=True, index=True)
     password_hash = Column(String(255), nullable=False)
     status = Column(String(32), nullable=False, default=USER_STATUS_ACTIVE, index=True)
-
-    # Поля профиля
-    first_name = Column(String(255), nullable=True)
-    last_name = Column(String(255), nullable=True)
-    avatar = Column(String(500), nullable=True)
-
-    # Флаги статуса
-    is_active = Column(Boolean, default=True)
-    is_verified = Column(Boolean, default=False)
-
-    # Баланс (из функции баланса клиента Merchant API)
-    balance = Column(Float, default=0.0)
-
-    # Поля интеграции с Merchant API
-    merchant_client_id = Column(Integer, nullable=True, index=True)
-    telegram_uid = Column(String(255), nullable=True, unique=True)
-    session_token = Column(String(500), nullable=True)
+    astatus = Column(String(32), nullable=False, default=ADMIN_STATUS_NONE, index=True)
 
     # Временные метки
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     last_login = Column(DateTime(timezone=True), nullable=True)
 
+    # --- Связи: профиль и настройки (блок 2) ---
     settings = relationship(
         "UserSetting",
         uselist=False,
         back_populates="user",
         cascade="all, delete-orphan",
     )
+
+    # --- Связи: интеграции (блок 3) ---
     msdk = relationship(
         "UserMSDK",
         uselist=False,
@@ -84,7 +99,11 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+
+    # --- Связи: роли и ранги (блок 4) ---
     roles = relationship("UserRole", back_populates="user", cascade="all, delete-orphan")
+
+    # --- Связи: репутация и статистика (блок 5) ---
     stats = relationship(
         "UserStats",
         uselist=False,
@@ -97,6 +116,10 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+
+    # --- Связи: история и логи (блок 6) — TODO ---
+
+    # ----- Хелперы для ленивой инициализации связей -----
 
     def _ensure_settings(self):
         if self.settings is None:
@@ -112,6 +135,8 @@ class User(Base):
         if self.tg is None:
             self.tg = UserTG()
         return self.tg
+
+    # ----- Прокси-свойства: профиль (блок 2) -----
 
     @property
     def display_name(self):
@@ -137,21 +162,7 @@ class User(Base):
     def avatar(self, value):
         self._ensure_settings().avatar = value
 
-    @property
-    def first_name(self):
-        return self.settings.first_name if self.settings else None
-
-    @first_name.setter
-    def first_name(self, value):
-        self._ensure_settings().first_name = value
-
-    @property
-    def last_name(self):
-        return self.settings.last_name if self.settings else None
-
-    @last_name.setter
-    def last_name(self, value):
-        self._ensure_settings().last_name = value
+    # ----- Прокси-свойства: Merchant API (блок 3) -----
 
     @property
     def merchant_client_id(self):
@@ -179,6 +190,8 @@ class User(Base):
     def session_token(self, value):
         self._ensure_msdk().session_token = value
 
+    # ----- Прокси-свойства: Telegram (блок 3) -----
+
     @property
     def telegram_uid(self):
         return self.tg.telegram_uid if self.tg else None
@@ -190,6 +203,147 @@ class User(Base):
     def __repr__(self) -> str:
         return f"<User(hash_id={self.hash_id!r}, username={self.username!r})>"
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 2. ПРОФИЛЬ И НАСТРОЙКИ
+# ═══════════════════════════════════════════════════════════════════════════
+
+class UserSetting(Base):
+    """Настройки и дополнительные данные профиля пользователя.
+
+    Атрибуты:
+        display_name:  Отображаемое имя (необязательно).
+        email:         E-mail (уникальный, необязательно).
+        avatar:        URL аватара.
+    """
+    __tablename__ = "user_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+
+    display_name = Column(String(255), nullable=True)
+    email = Column(String(255), nullable=True, unique=True, index=True)
+    avatar = Column(String(500), nullable=True)
+
+    user = relationship("User", back_populates="settings")
+
+    def __repr__(self) -> str:
+        return f"<UserSetting(user_id={self.user_id!r}, display_name={self.display_name!r})>"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 3. ИНТЕГРАЦИИ (Merchant API, Telegram)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class UserMSDK(Base):
+    """Данные интеграции пользователя с Merchant API.
+
+    Атрибуты:
+        merchant_client_id:  ID клиента в Merchant API.
+        balance:             Баланс (Numeric для точности).
+        session_token:       Сессионный токен Merchant API.
+    """
+    __tablename__ = "user_msdk"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+
+    merchant_client_id = Column(Integer, nullable=True, index=True)
+    balance = Column(Numeric(precision=18, scale=8), nullable=False, default=0)
+    session_token = Column(String(500), nullable=True)
+
+    user = relationship("User", back_populates="msdk")
+
+    def __repr__(self) -> str:
+        return f"<UserMSDK(user_id={self.user_id!r}, balance={self.balance!r})>"
+
+
+class UserTG(Base):
+    """Данные интеграции пользователя с Telegram.
+
+    Атрибуты:
+        telegram_uid:  UID пользователя в Telegram.
+        first_name:    Имя из Telegram-профиля.
+        last_name:     Фамилия из Telegram-профиля.
+        username:      @Никнейм из Telegram-профиля.
+    """
+    __tablename__ = "user_tg"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+
+    telegram_uid = Column(String(255), nullable=True, unique=True)
+    first_name = Column(String(255), nullable=True)
+    last_name = Column(String(255), nullable=True)
+    username = Column(String(255), nullable=True)
+
+    user = relationship("User", back_populates="tg")
+
+    def __repr__(self) -> str:
+        return f"<UserTG(user_id={self.user_id!r}, telegram_uid={self.telegram_uid!r})>"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 4. РОЛИ И РАНГИ
+# ═══════════════════════════════════════════════════════════════════════════
+
+# TODO: Добавить модель UserRole
+
+# TODO: РАЗОБРАТЬСЯ И СОЗДАТЬ РАНГИ
+class UserRanksConfig(Base):
+    """Справочник рангов пользователей.
+
+    Каждая запись — один ранг для конкретной роли.
+    Текущий ранг пользователя определяется как максимальный
+    ``rank_level``, где ``min_exp <= user.exp``.
+
+    Атрибуты:
+        role:           К какой роли относится ранг.
+        rank_level:     Числовой уровень (1, 2, 3…).
+        rank_name:      Название (Bronze, Silver, Gold…).
+        min_exp:        Минимальный опыт для получения ранга.
+        benefits_json:  Бонусы в формате JSONB.
+    """
+    __tablename__ = "user_ranks_config"
+
+    class Role(str, Enum):
+        user = "user"
+        buyer = "buyer"
+        seller = "seller"
+        servicer = "servicer"
+        admin = "admin"
+
+    id = Column(Integer, primary_key=True, index=True)
+    role = Column(SqlEnum(Role, name="user_rank_role"), nullable=False, index=True)
+    rank_level = Column(Integer, nullable=False, index=True)
+    rank_name = Column(String(255), nullable=False, unique=True)
+    min_exp = Column(Integer, nullable=False)
+    benefits_json = Column(JSONB, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<UserRanksConfig(role={self.role!r}, rank_name={self.rank_name!r}, level={self.rank_level!r})>"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 5. РЕПУТАЦИЯ И СТАТИСТИКА
+# ═══════════════════════════════════════════════════════════════════════════
+
+# TODO: Добавить модель UserReputation
+# TODO: Добавить модель UserStats (статистика сообщений и т.д.)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 6. ИСТОРИЯ И ЛОГИ
+# ═══════════════════════════════════════════════════════════════════════════
+
+# TODO: Логи смены паролей
+# TODO: История входов / авторизаций в Telegram
+# TODO: Журнал действий пользователя (audit log)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 7. СОБЫТИЯ SQLAlchemy
+# ═══════════════════════════════════════════════════════════════════════════
 
 def _set_hash_id_before_insert(mapper, connection, target):
     """Автоматически генерирует ``hash_id`` перед INSERT, если не задан."""
