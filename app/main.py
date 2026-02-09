@@ -7,8 +7,14 @@ FastAPI-приложение с REST-эндпоинтами для управл�
 Все публичные эндпоинты используют ``hash_id`` вместо числового ``id``
 для идентификации пользователей.
 """
+import base64
 import logging
-from fastapi import FastAPI, Depends, HTTPException
+import os
+import re
+from pathlib import Path
+
+from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from typing import List
 from contextlib import asynccontextmanager
@@ -23,6 +29,10 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
+# Каталог для сохранённых файлов капчи
+CAPTCHA_DIR = Path(os.getenv("CAPTCHA_DIR", "captcha_images"))
+CAPTCHA_DIR.mkdir(parents=True, exist_ok=True)
+
 
 # ---------------------------------------------------------------------------
 # Жизненный цикл приложения
@@ -32,6 +42,7 @@ load_dotenv()
 async def lifespan(app: FastAPI):
     """Инициализация таблиц БД при старте сервера."""
     init_db()
+    CAPTCHA_DIR.mkdir(parents=True, exist_ok=True)
     yield
 
 
@@ -41,6 +52,13 @@ app = FastAPI(
     description="Единый API-сервер для экосистемы ботов LUCICORE",
     version="1.0.0",
     lifespan=lifespan,
+)
+
+# Статика: файлы капчи доступны по /captcha_images/{filename}
+app.mount(
+    "/captcha_images",
+    StaticFiles(directory=str(CAPTCHA_DIR)),
+    name="captcha_images",
 )
 
 
@@ -206,13 +224,46 @@ def delete_user_by_hash(
 # =========================================================================
 
 @app.get("/merchant/captcha", response_model=schemas.MerchantCaptcha)
-def get_merchant_captcha(bridge: MerchantBridge = Depends(get_merchant_bridge)):
-    """Получить капчу для регистрации/входа в Web Client API."""
+def get_merchant_captcha(
+    request: Request,
+    bridge: MerchantBridge = Depends(get_merchant_bridge),
+):
+    """Получить капчу для регистрации/входа в Web Client API.
+
+    Изображение сохраняется на диск в папку ``captcha_images/``
+    и отдаётся как прямая ссылка ``image_url``.
+    """
     try:
         data = bridge.get_captcha()
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc))
-    return schemas.MerchantCaptcha(captcha_id=data["captcha_id"], image=data["image"])
+
+    captcha_id: str = data["captcha_id"]
+    image_b64: str = data["image"]
+
+    # Декодируем base64 → PNG и сохраняем на диск
+    # Формат: "data:image/png;base64,iVBOR…"
+    match = re.match(r"data:image/\w+;base64,(.+)", image_b64)
+    raw_b64 = match.group(1) if match else image_b64
+    png_bytes = base64.b64decode(raw_b64)
+
+    # Безопасное имя файла из captcha_id
+    safe_name = re.sub(r"[^\w\-]", "_", captcha_id)
+    filename = f"{safe_name}.png"
+    filepath = CAPTCHA_DIR / filename
+    filepath.write_bytes(png_bytes)
+
+    # Формируем абсолютный URL на статический файл
+    base_url = str(request.base_url).rstrip("/")
+    image_url = f"{base_url}/captcha_images/{filename}"
+
+    logger.info("Капча %s сохранена → %s", captcha_id, filepath)
+
+    return schemas.MerchantCaptcha(
+        captcha_id=captcha_id,
+        image=image_b64,
+        image_url=image_url,
+    )
 
 
 @app.post("/users/{user_id}/merchant/register", response_model=schemas.MerchantLinkResponse)
