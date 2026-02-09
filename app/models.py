@@ -10,14 +10,14 @@
     1. Ядро пользователя     — User
     2. Профиль и настройки    — UserSetting
     3. Интеграции             — UserMSDK, UserTG
-    4. Роли и ранги           — UserRole (TODO), UserRanksConfig
-    5. Репутация и статистика  — UserReputation (TODO), UserStats (TODO)
+    4. Роли и ранги           — UserRole, UserRanksConfig
+    5. Репутация и статистика  — UserReputation, UserMessageLog
     6. История и логи          — (TODO) логи паролей, входов, действий
     7. События SQLAlchemy
 """
 from enum import Enum
 
-from sqlalchemy import Column, Integer, String, DateTime, Numeric, event, ForeignKey, Boolean, Enum as SqlEnum
+from sqlalchemy import Column, Integer, String, DateTime, Numeric, event, ForeignKey, Boolean, Enum as SqlEnum, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -101,19 +101,23 @@ class User(Base):
     )
 
     # --- Связи: роли и ранги (блок 4) ---
-    roles = relationship("UserRole", back_populates="user", cascade="all, delete-orphan")
+    roles = relationship(
+        "UserRole",
+        foreign_keys="[UserRole.user_id]",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
 
     # --- Связи: репутация и статистика (блок 5) ---
-    stats = relationship(
-        "UserStats",
-        uselist=False,
+    message_stats = relationship(
+        "UserMessageLog",
         back_populates="user",
         cascade="all, delete-orphan",
     )
     reputation = relationship(
         "UserReputation",
-        uselist=False,
-        back_populates="user",
+        foreign_keys="[UserReputation.target_id]",
+        back_populates="target",
         cascade="all, delete-orphan",
     )
 
@@ -215,6 +219,7 @@ class UserSetting(Base):
         display_name:  Отображаемое имя (необязательно).
         email:         E-mail (уникальный, необязательно).
         avatar:        URL аватара.
+        data_json:     Дополнительные данные в формате JSONB (для гибкости).
     """
     __tablename__ = "user_settings"
 
@@ -224,6 +229,7 @@ class UserSetting(Base):
     display_name = Column(String(255), nullable=True)
     email = Column(String(255), nullable=True, unique=True, index=True)
     avatar = Column(String(500), nullable=True)
+    data_json = Column(JSONB, nullable=True)
 
     user = relationship("User", back_populates="settings")
 
@@ -287,7 +293,44 @@ class UserTG(Base):
 # 4. РОЛИ И РАНГИ
 # ═══════════════════════════════════════════════════════════════════════════
 
-# TODO: Добавить модель UserRole
+
+class UserRole(Base):
+    """Связь пользователя с ролью (many-to-many).
+
+    У одного пользователя может быть несколько ролей одновременно
+    (например buyer + seller).  Уникальность пары (user_id, role)
+    гарантирует UniqueConstraint.
+
+    Атрибуты:
+        user_id:      FK → users.
+        role:         Роль (enum: user, buyer, seller, servicer, admin).
+        assigned_at:  Когда роль была назначена.
+        assigned_by:  Кто назначил (FK → users, NULL = система).
+    """
+    __tablename__ = "user_roles"
+    __table_args__ = (
+        UniqueConstraint("user_id", "role", name="uq_user_role"),
+    )
+
+    class RoleEnum(str, Enum):
+        user = "user"
+        buyer = "buyer"
+        seller = "seller"
+        servicer = "servicer"
+        admin = "admin"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    role = Column(SqlEnum(RoleEnum, name="user_role_type"), nullable=False, index=True)
+    assigned_at = Column(DateTime(timezone=True), server_default=func.now())
+    assigned_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    user = relationship("User", foreign_keys=[user_id], back_populates="roles")
+    assigner = relationship("User", foreign_keys=[assigned_by])
+
+    def __repr__(self) -> str:
+        return f"<UserRole(user_id={self.user_id!r}, role={self.role!r})>"
+
 
 # TODO: РАЗОБРАТЬСЯ И СОЗДАТЬ РАНГИ
 class UserRanksConfig(Base):
@@ -328,8 +371,72 @@ class UserRanksConfig(Base):
 # 5. РЕПУТАЦИЯ И СТАТИСТИКА
 # ═══════════════════════════════════════════════════════════════════════════
 
-# TODO: Добавить модель UserReputation
-# TODO: Добавить модель UserStats (статистика сообщений и т.д.)
+
+class UserReputation(Base):
+    """Запись об изменении репутации пользователя.
+
+    Каждая строка — одно событие: кто-то (source) изменил репутацию
+    кого-то (target) на ``value_change`` единиц с комментарием.
+
+    Атрибуты:
+        target_id:     ID пользователя, чья репутация меняется (FK → users).
+        source_id:     ID пользователя-инициатора (FK → users, NULL для системы).
+        value_change:  Дельта репутации (+1, −1, +5 и т.д.).
+        comment:       Комментарий / причина изменения.
+        created_at:    Дата и время события.
+    """
+    __tablename__ = "user_reputation"
+
+    id = Column(Integer, primary_key=True, index=True)
+    target_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    value_change = Column(Integer, nullable=False)
+    comment = Column(String(500), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    target = relationship("User", foreign_keys=[target_id], back_populates="reputation")
+    source = relationship("User", foreign_keys=[source_id])
+
+    def __repr__(self) -> str:
+        return (
+            f"<UserReputation(target={self.target_id!r}, source={self.source_id!r}, "
+            f"change={self.value_change!r})>"
+        )
+
+
+class UserMessageLog(Base):
+    """Лог сообщений пользователя.
+
+    Каждая строка — одно сообщение.  Для получения статистики
+    за произвольный период используется фильтрация по ``created_at``:
+
+    Примеры SQL::
+
+        -- Всего сообщений
+        SELECT COUNT(*) FROM user_message_log WHERE user_id = :uid;
+
+        -- За последний час
+        SELECT COUNT(*) FROM user_message_log
+         WHERE user_id = :uid AND created_at >= NOW() - INTERVAL '1 hour';
+
+        -- За 1 день / 3 дня / неделю — аналогично с '1 day', '3 days', '7 days'.
+
+    Атрибуты:
+        user_id:     FK → users.
+        channel:     Канал сообщения (например: 'telegram', 'web', 'api').
+        created_at:  Время отправки (индексировано для быстрых агрегатов).
+    """
+    __tablename__ = "user_message_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    channel = Column(String(32), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+    user = relationship("User", back_populates="message_stats")
+
+    def __repr__(self) -> str:
+        return f"<UserMessageLog(user_id={self.user_id!r}, channel={self.channel!r}, at={self.created_at!r})>"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
