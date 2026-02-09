@@ -21,6 +21,8 @@ class UserDatabase(BaseModel):
     id: int
     hash_id: str
     username: str
+    status: str
+    display_name: Optional[str] = None
     email: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
@@ -48,6 +50,7 @@ class UserBase(BaseModel):
         avatar:     URL аватара.
     """
     username: str
+    display_name: Optional[str] = None
     email: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
@@ -69,6 +72,8 @@ class UserUpdate(BaseModel):
     Все поля опциональны — передаются только изменяемые.
     """
     username: Optional[str] = None
+    status: Optional[str] = None
+    display_name: Optional[str] = None
     email: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
@@ -173,6 +178,7 @@ class User(UserBase):
     hash_id: str
     is_active: bool
     is_verified: bool
+    status: str
     balance: float
     merchant_client_id: Optional[int] = None
     telegram_uid: Optional[str] = None
