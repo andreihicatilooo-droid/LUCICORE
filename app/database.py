@@ -6,10 +6,22 @@
 """
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.dialects.postgresql import JSONB
 import os
 
 # URL подключения к БД — по умолчанию SQLite
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./lucicore.db")
+
+
+# ---------------------------------------------------------------------------
+# SQLite-совместимость: JSONB → JSON
+# ---------------------------------------------------------------------------
+# PostgreSQL-тип JSONB не поддерживается SQLite.  Регистрируем fallback,
+# чтобы при использовании SQLite колонки JSONB создавались как JSON (TEXT).
+@compiles(JSONB, "sqlite")
+def _compile_jsonb_for_sqlite(type_, compiler, **kw):
+    return "JSON"
 
 # Движок SQLAlchemy
 engine = create_engine(
