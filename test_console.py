@@ -23,11 +23,6 @@ import json
 import os
 import sys
 import time
-from datetime import datetime
-from typing import Any, Optional
-
-# Добавляем корень проекта в PATH, чтобы импорт shared работал
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from dotenv import load_dotenv
 from shared.lucicore_client import LucicoreClient, LucicoreAPIError
